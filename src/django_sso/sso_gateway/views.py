@@ -5,8 +5,8 @@ from typing import Optional
 
 import django.contrib.auth.views
 from django.conf import settings
-from django.contrib.auth import logout, get_user_model
-from django.http import JsonResponse
+from django.contrib.auth import get_user_model, login, logout
+from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
 from django.utils.translation import gettext_lazy as _
@@ -15,49 +15,61 @@ from django.views.generic import TemplateView
 from django.views.generic.base import View
 from django.views.generic.edit import FormView
 
-from .models import Service, AuthenticationRequest
 from .. import deauthenticate_user
 from ..exceptions import SSOException
+from .models import AuthenticationRequest, Service
 
 
 class LoginView(django.contrib.auth.views.LoginView):
-	template_name = 'django_sso/login.html'
+    template_name = "django_sso/login.html"
+    auth_request = None
 
-	@csrf_exempt
-	def dispatch(self, request, *args, **kwargs):
-		if not request.user.is_anonymous:
-			return redirect(self.get_success_url())
+    @csrf_exempt
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_anonymous:
+            return redirect(self.get_success_url())
 
-		return super(FormView, self).dispatch(request, *args, **kwargs)
+        return super(FormView, self).dispatch(request, *args, **kwargs)
 
-	def get_success_url(self):
-		sso_request_token = self.request.GET.get('sso', '').strip()
-		auth_request = None
+    def get_success_url(self):
+        LOGIN_REDIRECT_URL = getattr(
+            settings, "LOGIN_REDIRECT_URL", reverse_lazy("welcome")
+        )
 
-		if sso_request_token:
-			auth_request: Optional[AuthenticationRequest] = AuthenticationRequest.objects.filter(
-				token=sso_request_token,
-				used=False,
-			).first()
+        if not self.auth_request or not self.auth_request.next_url:
+            return LOGIN_REDIRECT_URL
 
-		LOGIN_REDIRECT_URL = getattr(settings, 'LOGIN_REDIRECT_URL', reverse_lazy('welcome'))
+        try:
+            self.auth_request.activate(self.request.user)
+        except SSOException as e:
+            logging.critical(
+                f"Failed to emit login event to subordinated service {self.auth_request.service}: {e}"
+            )
 
-		if not auth_request or not auth_request.next_url:
-			return LOGIN_REDIRECT_URL
+            return LOGIN_REDIRECT_URL + "?fallback=true"
 
-		try:
-			auth_request.activate(self.request.user)
-		except SSOException as e:
-			logging.critical(f'Failed to emit login event to subordinated service {auth_request.service}: {e}')
+        return f"{self.auth_request.service.base_url}/sso/accept/"
 
-			return LOGIN_REDIRECT_URL + '?fallback=true'
+    def form_valid(self, form):
+        login(self.request, form.get_user())
+        sso_request_token = self.request.GET.get("sso", "").strip()
 
-		return f'{auth_request.service.base_url}/sso/accept/'
+        if sso_request_token:
+            self.auth_request: Optional[AuthenticationRequest] = (
+                AuthenticationRequest.objects.filter(
+                    token=sso_request_token,
+                    used=False,
+                ).first()
+            )
 
-	def form_valid(self, form):
-		super().form_valid(form)
+        if self.auth_request:
+            if (
+                self.request.user not in self.auth_request.service.users.all()
+                and self.auth_request.service.users.count() > 0
+            ):
+                return HttpResponseForbidden(_("You don't have access to this service"))
 
-		return redirect(self.get_success_url())
+        return redirect(self.get_success_url())
 
 
 class LogoutView(View):

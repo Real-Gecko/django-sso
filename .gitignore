@@ -2,3 +2,9 @@
 *.egg-info
 dist
 build
+.*
+core
+manage.py
+pyproject.toml
+uv.lock
+db.sqlite3

@@ -1,11 +1,12 @@
 from django.contrib import admin
-from .models import Service, AuthenticationRequest
+
+from .models import AuthenticationRequest, Service
 
 
 @admin.register(Service)
 class ServiceAdmin(admin.ModelAdmin):
-	list_display = 'name', 'base_url', 'enabled'
-	fields = 'name', 'base_url', 'token', 'enabled'
+    list_display = "name", "base_url", "enabled"
+    fields = "name", "base_url", "token", "enabled", "users"
 
 
 @admin.register(AuthenticationRequest)

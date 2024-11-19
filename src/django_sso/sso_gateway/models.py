@@ -1,5 +1,5 @@
 import logging
-from inspect import ismethod, isfunction
+from inspect import isfunction, ismethod
 from typing import Union
 
 import requests
@@ -28,6 +28,9 @@ class Service(models.Model):
     base_url = models.URLField(verbose_name=_('Base url'))
     enabled = models.BooleanField(default=False, verbose_name=_('Enabled'))
     token = models.CharField(max_length=128, verbose_name=_('Token'), unique=True, default=service_token_generator)
+    users = models.ManyToManyField(
+        user_model, verbose_name=_("Users"), blank=True, related_name="services"
+    )
 
     def __str__(self):
         return self.base_url
